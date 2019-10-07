@@ -318,7 +318,7 @@ impl GameState {
                         if !self.in_combat {
                             r.push(Action::Talk);
                         }
-                    } else if !self.proto_db.proto(obj.pid.proto_id().unwrap()).unwrap()
+                    } else if !self.proto_db.proto(obj.pid.proto_id().unwrap()).unwrap().borrow()
                         .sub.critter().unwrap()
                         .flags.contains(CritterFlag::NoSteal)
                     {

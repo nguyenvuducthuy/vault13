@@ -347,6 +347,7 @@ impl<'a, R: 'a + Read> MapReader<'a, R> {
             match pid.kind() {
                 EntityKind::Item => {
                     let proto = self.proto_db.proto(pid).unwrap();
+                    let proto = proto.borrow();
                     match proto.sub.item().unwrap().sub {
                         SubItem::Weapon(ref proto) => {
                             let _charges = self.reader.read_i32::<BigEndian>()?;
