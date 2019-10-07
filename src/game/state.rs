@@ -19,7 +19,7 @@ use crate::asset::script::db::ScriptDb;
 use crate::fs::FileSystem;
 use crate::game::dialog::Dialog;
 use crate::game::fidget::Fidget;
-use crate::game::object::{self, LightEmitter, Object, ObjectProtoId};
+use crate::game::object::{self, LightEmitter, Object, ObjectProto, ObjectProtoId};
 use crate::game::sequence::move_seq::Move;
 use crate::game::sequence::stand::Stand;
 use crate::game::script::{self, Scripts, ScriptKind};
@@ -195,7 +195,7 @@ impl GameState {
 
         let dude_fid = FrameId::from_packed(0x100003E).unwrap();
         //    let dude_fid = FrameId::from_packed(0x101600A).unwrap();
-        let mut dude_obj = Object::new(dude_fid, ObjectProtoId::Dude, Some(map.entrance));
+        let mut dude_obj = Object::new(dude_fid, ObjectProto::Dude, Some(map.entrance));
         dude_obj.direction = Direction::NE;
         dude_obj.light_emitter = LightEmitter {
             intensity: 0x10000,
@@ -318,7 +318,7 @@ impl GameState {
                         if !self.in_combat {
                             r.push(Action::Talk);
                         }
-                    } else if !self.proto_db.proto(obj.pid.proto_id().unwrap()).unwrap().borrow()
+                    } else if !self.proto_db.proto(obj.proto.id().proto_id().unwrap()).unwrap().borrow()
                         .sub.critter().unwrap()
                         .flags.contains(CritterFlag::NoSteal)
                     {
@@ -368,9 +368,9 @@ impl GameState {
             if lookero.sub.critter().map(|c| c.is_dead()).unwrap_or(true)
                 // TODO This is only useful for mapper?
                 || lookedo.kind() == EntityKind::SqrTile
-                || lookedo.pid != ObjectProtoId::Dude &&
-                    (lookedo.pid.proto_id().is_none()
-                        || self.proto_db.proto(lookedo.pid.proto_id().unwrap()).is_err())
+                || lookedo.proto.id() != ObjectProtoId::Dude &&
+                    (lookedo.proto.id().proto_id().is_none()
+                        || self.proto_db.proto(lookedo.proto.id().proto_id().unwrap()).is_err())
             {
                 return None;
             }
@@ -463,7 +463,7 @@ impl GameState {
             let world = self.world.borrow();
             let examinedo = world.objects().get(examined).borrow();
             if !examinedo.sub.critter().map(|c| c.is_dead()).unwrap_or(false) {
-                let descr = if let Some(descr) = examinedo.pid.proto_id()
+                let descr = if let Some(descr) = examinedo.proto.id().proto_id()
                     .and_then(|pid| self.proto_db.description(pid).unwrap())
                     .filter(|desr| {
                         // Compare to "<None>".

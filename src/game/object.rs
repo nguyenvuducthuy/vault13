@@ -5,12 +5,13 @@ use if_chain::if_chain;
 use slotmap::{SecondaryMap, SlotMap};
 use std::cell::RefCell;
 use std::{cmp, fmt};
+use std::io;
 use std::mem;
 use std::rc::Rc;
 
 use crate::asset::{CritterAnim, EntityKind, Flag, FlagExt, ItemKind, WeaponKind};
 use crate::asset::frame::{FrameId, FrameDb};
-use crate::asset::proto::{self, CritterKillKind, ProtoId, ProtoDb};
+use crate::asset::proto::{self, CritterKillKind, Proto, ProtoId, ProtoDb};
 use crate::asset::script::ProgramId;
 use crate::game::script::{Scripts, Sid};
 use crate::graphics::{EPoint, Point, Rect};
@@ -27,6 +28,8 @@ use crate::vm::PredefinedProc;
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum ObjectProtoId {
+    // TODO Is this really a thing? Currently during map loading all objects are expected to
+    // have a ProtoId.
     None,
     /// Special ID used for dude object (packed as 0x1000000).
     Dude,
@@ -39,6 +42,14 @@ impl ObjectProtoId {
             Some(v)
         } else {
             None
+        }
+    }
+
+    pub fn proto(self, proto_db: &ProtoDb) -> io::Result<ObjectProto> {
+        match self {
+            ObjectProtoId::None => Ok(ObjectProto::None),
+            ObjectProtoId::Dude => Ok(ObjectProto::Dude),
+            ObjectProtoId::ProtoId(pid) => proto_db.proto(pid).map(|v| v.into()),
         }
     }
 
@@ -81,6 +92,37 @@ impl fmt::Debug for ObjectProtoId {
 impl From<ProtoId> for ObjectProtoId {
     fn from(v: ProtoId) -> Self {
         ObjectProtoId::ProtoId(v)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum ObjectProto {
+    None,
+    Dude,
+    Proto(Rc<RefCell<Proto>>),
+}
+
+impl ObjectProto {
+    pub fn id(&self) -> ObjectProtoId {
+        match self {
+            ObjectProto::None => ObjectProtoId::None,
+            ObjectProto::Dude => ObjectProtoId::Dude,
+            ObjectProto::Proto(p) => p.borrow().pid.into(),
+        }
+    }
+
+    pub fn proto(&self) -> Option<&Rc<RefCell<Proto>>> {
+        if let ObjectProto::Proto(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+}
+
+impl From<Rc<RefCell<Proto>>> for ObjectProto {
+    fn from(v: Rc<RefCell<Proto>>) -> Self {
+        ObjectProto::Proto(v)
     }
 }
 
@@ -177,7 +219,7 @@ pub struct Object {
     pub frame_idx: usize,
     pub direction: Direction,
     pub light_emitter: LightEmitter,
-    pub pid: ObjectProtoId,
+    pub proto: ObjectProto,
     pub inventory: Inventory,
     pub outline: Option<Outline>,
     pub sequence: Option<Cancel>,
@@ -186,7 +228,7 @@ pub struct Object {
 }
 
 impl Object {
-    pub fn new(fid: FrameId, pid: ObjectProtoId, pos: Option<EPoint>) -> Self {
+    pub fn new(fid: FrameId, proto: ObjectProto, pos: Option<EPoint>) -> Self {
         Self {
             pos,
             screen_pos: Point::new(0, 0),
@@ -195,7 +237,7 @@ impl Object {
             frame_idx: 0,
             direction: Direction::NE,
             flags: BitFlags::empty(),
-            pid,
+            proto,
             inventory: Inventory::new(),
             light_emitter: LightEmitter {
                 intensity: 0,
@@ -366,7 +408,7 @@ impl Object {
             && !self.has_trans()
             // Scenery or wall with position and proto.
             && (kind == EntityKind::Scenery || kind == EntityKind::Wall)
-                && self.pos.is_some() && self.pid.proto_id().is_some();
+                && self.pos.is_some() && self.proto.id().proto_id().is_some();
 
         if !with_egg {
             return self.get_trans_effect();
@@ -375,7 +417,7 @@ impl Object {
         let egg = egg.unwrap();
 
         let pos = self.pos.unwrap().point;
-        let proto_flags_ext = proto_db.proto(self.pid.proto_id().unwrap()).unwrap().borrow().flags_ext;
+        let proto_flags_ext = self.proto.proto().unwrap().borrow().flags_ext;
 
         let with_egg = if proto_flags_ext.intersects(
                 FlagExt::WallEastOrWest | FlagExt::WallWestCorner) {
@@ -527,7 +569,7 @@ impl Objects {
 
             if obj.fid.kind() == EntityKind::Wall {
                 if !obj.flags.contains(Flag::Flat) {
-                    let flags_ext = self.proto_db.proto(obj.pid.proto_id().unwrap()).unwrap().borrow().flags_ext;
+                    let flags_ext = obj.proto.proto().unwrap().borrow().flags_ext;
                     if flags_ext.contains(FlagExt::WallEastOrWest) ||
                             flags_ext.contains(FlagExt::WallEastCorner) {
                         if dir != Direction::W
@@ -850,7 +892,7 @@ impl Objects {
         let obj = self.get(obj).borrow();
         if_chain! {
             if let SubObject::Critter(c) = &obj.sub;
-            if let Some(pid) = obj.pid.proto_id();
+            if let Some(pid) = obj.proto.id().proto_id();
             then {
                 c.is_active() && self.proto_db.can_talk_to(pid)
             } else {
@@ -861,7 +903,7 @@ impl Objects {
 
     // obj_action_can_use()
     pub fn can_use(&self, obj: Handle) -> bool {
-        if let Some(pid) = self.get(obj).borrow().pid.proto_id() {
+        if let Some(pid) = self.get(obj).borrow().proto.id().proto_id() {
             match pid {
                 | ProtoId::ACTIVE_DYNAMITE
                 | ProtoId::ACTIVE_FLARE
@@ -878,7 +920,7 @@ impl Objects {
     pub fn item_kind(&self, obj: Handle) -> Option<ItemKind> {
         let obj = self.get(obj).borrow();
         if obj.kind() == EntityKind::Item {
-            let pid = obj.pid.proto_id().unwrap();
+            let pid = obj.proto.id().proto_id().unwrap();
             if pid == ProtoId::SHIV {
                 return Some(self.proto_db.proto(pid).unwrap().borrow()
                     .sub.item().unwrap()
@@ -950,10 +992,10 @@ impl Objects {
                     self.is_blocked_at(obj, p) // TODO check anim_can_use_door_(obj, v22)
                 {
                     TileState::Blocked
-                } else if let Some(pid) = o.pid.proto_id() {
+                } else if let Some(pid) = o.proto.id().proto_id() {
                     let radioactive_goo = self.at(p)
                         .iter()
-                        .any(|&h| self.get(h).borrow().pid.proto_id()
+                        .any(|&h| self.get(h).borrow().proto.id().proto_id()
                             .map(|pid| pid.is_radioactive_goo())
                             .unwrap_or(false));
                     let cost = if radioactive_goo {
@@ -1034,7 +1076,7 @@ impl Objects {
         if_chain! {
             if let Some(obj_pos) = obj.pos;
             let obj_pos = obj_pos.point;
-            if let Some(pid) = obj.pid.proto_id();
+            if let Some(pid) = obj.proto.id().proto_id();
             if pid.kind() == EntityKind::Wall || pid.kind() == EntityKind::Scenery;
             then {
                 if !egg.hit_test(p, tile_grid, &self.frm_db) {
@@ -1276,7 +1318,7 @@ mod test {
         let screen_shift = Point::new(10, 20);
         let base = Point::new(2384, 468) + screen_shift;
 
-        let mut obj = Object::new(FrameId::BLANK, ObjectProtoId::None, Some((0, (55, 66)).into()));
+        let mut obj = Object::new(FrameId::BLANK, ObjectProto::None, Some((0, (55, 66)).into()));
         obj.screen_shift = screen_shift;
         assert_eq!(obj.bounds0(Point::new(-1, 3), Point::new(29, 63), &View::default()),
             Rect::with_points(Point::new(1, -51), Point::new(30, 12))

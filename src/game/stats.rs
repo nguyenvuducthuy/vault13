@@ -74,7 +74,7 @@ impl Stats {
         use Perk::*;
         use Stat::*;
 
-        let pei = |p| self.has_perk(p, obj.pid) as i32;
+        let pei = |p| self.has_perk(p, obj.proto.id()) as i32;
 
         if stat == Age {
             // TODO
@@ -95,13 +95,13 @@ impl Stats {
                 r -= -left / 40 + 1;
             }
         }
-        if obj.pid == ObjectProtoId::Dude {
+        if obj.proto.id() == ObjectProtoId::Dude {
             r += self.trait_modifier(stat, obj);
 
             r += match stat {
                 Strength => {
                     pei(GainStrength) +
-                        if self.has_perk(AdrenalineRush, obj.pid) &&
+                        if self.has_perk(AdrenalineRush, obj.proto.id()) &&
                             self.stat(CurrentHitPoints, obj) < self.stat(HitPoints, obj) / 2
                         {
                             1
@@ -140,17 +140,17 @@ impl Stats {
                     -2 * pei(AutodocHpNeg1) +
                     -4 * pei(AutodocHpNeg2),
                 DmgResistLaser | DmgResistFire | DmgResistPlasma =>
-                    if self.has_perk(PhoenixArmor, obj.pid) {
+                    if self.has_perk(PhoenixArmor, obj.proto.id()) {
                         5
-                    } else if self.has_perk(PhoenixEnhancement, obj.pid) {
+                    } else if self.has_perk(PhoenixEnhancement, obj.proto.id()) {
                         10
                     } else {
                         0
                     }
                 DmgResist | DmgResistExplosion =>
-                    if self.has_perk(DermalArmor, obj.pid) {
+                    if self.has_perk(DermalArmor, obj.proto.id()) {
                         5
-                    } else if self.has_perk(DermalEnhancement, obj.pid) {
+                    } else if self.has_perk(DermalEnhancement, obj.proto.id()) {
                         10
                     } else {
                         0
@@ -215,7 +215,7 @@ impl Stats {
     fn with_critter_proto<F, R>(&self, obj: &Object, f: F) -> R
         where F: FnOnce(&proto::Critter) -> R
     {
-        let proto = self.proto_db.proto(obj.pid.proto_id().unwrap()).unwrap();
+        let proto = self.proto_db.proto(obj.proto.id().proto_id().unwrap()).unwrap();
         let proto = proto.borrow();
         f(proto.sub.critter().unwrap())
     }
